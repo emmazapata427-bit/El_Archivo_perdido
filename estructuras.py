@@ -1,8 +1,9 @@
-"""Estructuras propias del proyecto: nodo y árbol binario de búsqueda (BST).
+"""Estructuras propias del proyecto: nodo, árbol binario de búsqueda (BST) y
+búsqueda secuencial de referencia.
 
 El árbol se indexa por el ``codigo`` del fragmento. Todas las operaciones son
 iterativas (no recursivas) para que el caso degenerado (inserción en orden
-creciente) no agote el límite de recursión de Python.
+creciente) no agote el límite de recursión de Python. No usa librerías externas.
 """
 
 
@@ -10,6 +11,14 @@ class Nodo:
     """Nodo del BST: guarda la clave (codigo) y el fragmento completo."""
 
     def __init__(self, codigo, fragmento):
+        """Crea un nodo sin hijos.
+
+        Parámetros:
+            codigo (int): clave numérica del fragmento.
+            fragmento (dict): fragmento completo asociado a la clave.
+        Retorna:
+            None.
+        """
         self.codigo = codigo
         self.fragmento = fragmento
         self.izquierdo = None
@@ -20,11 +29,25 @@ class ArbolBST:
     """Árbol binario de búsqueda sin códigos repetidos."""
 
     def __init__(self):
+        """Crea un árbol vacío.
+
+        Parámetros:
+            ninguno.
+        Retorna:
+            None.
+        """
         self.raiz = None
         self.tamano = 0
 
     def insertar(self, codigo, fragmento):
-        """Inserta un fragmento. Devuelve False si el código ya existía."""
+        """Inserta un fragmento respetando el orden del BST.
+
+        Parámetros:
+            codigo (int): clave del fragmento.
+            fragmento (dict): fragmento a almacenar.
+        Retorna:
+            bool: True si se insertó; False si el código ya existía.
+        """
         nuevo = Nodo(codigo, fragmento)
         if self.raiz is None:
             self.raiz = nuevo
@@ -49,7 +72,13 @@ class ArbolBST:
         return True
 
     def buscar(self, codigo):
-        """Busca por código. Devuelve (fragmento o None, comparaciones)."""
+        """Busca un fragmento por código contando las comparaciones.
+
+        Parámetros:
+            codigo (int): clave a buscar.
+        Retorna:
+            tuple: (fragmento o None, número de comparaciones realizadas).
+        """
         actual = self.raiz
         comparaciones = 0
         while actual is not None:
@@ -60,7 +89,14 @@ class ArbolBST:
         return None, comparaciones
 
     def inorden(self):
-        """Lista de códigos en orden ascendente (recorrido inorden iterativo)."""
+        """Recorre el árbol en inorden (izquierdo, raíz, derecho), sin recursión.
+
+        Parámetros:
+            ninguno.
+        Retorna:
+            list: códigos en el orden en que se visitan (ascendente si el
+            árbol está bien construido).
+        """
         resultado = []
         pila = []
         actual = self.raiz
@@ -74,7 +110,13 @@ class ArbolBST:
         return resultado
 
     def altura(self):
-        """Altura del árbol (0 si está vacío); útil para medir el degenerado."""
+        """Calcula la altura del árbol (útil para medir el caso degenerado).
+
+        Parámetros:
+            ninguno.
+        Retorna:
+            int: número de niveles (0 si el árbol está vacío).
+        """
         if self.raiz is None:
             return 0
         altura = 0
@@ -91,4 +133,30 @@ class ArbolBST:
         return altura
 
     def __len__(self):
+        """Devuelve la cantidad de nodos.
+
+        Parámetros:
+            ninguno.
+        Retorna:
+            int: número de fragmentos almacenados.
+        """
         return self.tamano
+
+
+def busqueda_secuencial(fragmentos, codigo):
+    """Busca un código recorriendo una lista, contando las comparaciones.
+
+    Sirve de referencia para contrastar con ``ArbolBST.buscar``.
+
+    Parámetros:
+        fragmentos (list): lista de diccionarios con la clave ``codigo``.
+        codigo (int): código a buscar.
+    Retorna:
+        tuple: (fragmento o None, número de comparaciones realizadas).
+    """
+    comparaciones = 0
+    for fragmento in fragmentos:
+        comparaciones += 1
+        if fragmento["codigo"] == codigo:
+            return fragmento, comparaciones
+    return None, comparaciones
