@@ -5,17 +5,19 @@ Lógica de salas, menús, puntaje y preguntas. Las estructuras propias están en
 
 Cada sala tiene un reto práctico (sin penalización) y una pregunta conceptual:
 si se falla se pierde vida y se cuenta un intento; si se acierta se recibe un
-fragmento del catálogo y se guarda la partida.
+fragmento del catálogo y se guarda la partida. Al completar las cinco salas se
+entra a la Sala Central, donde se ejecuta «La Reconstrucción del Catálogo».
 """
 
 import random
 
 import persistencia
-from estructuras import ArbolBST
+from estructuras import ArbolBST, busqueda_secuencial
 
 VIDA_INICIAL = 3
 PENALIZACION_INTENTO = 5
 TOTAL_SALAS = 5
+FRAGMENTOS_POR_ESTANTE = 3
 
 NOMBRES_SALAS = {
     1: "Vestíbulo",
@@ -127,7 +129,14 @@ PREGUNTAS = {
 
 # ------------------------------------------------------------ entrada validada
 def leer_texto(mensaje, max_len=20):
-    """Pide un texto no vacío de hasta max_len caracteres."""
+    """Pide un texto no vacío y repite hasta que sea válido.
+
+    Parámetros:
+        mensaje (str): texto que se muestra al pedir el dato.
+        max_len (int): longitud máxima permitida.
+    Retorna:
+        str: el texto ingresado, sin espacios en los extremos.
+    """
     while True:
         texto = input(mensaje).strip()
         if not texto:
@@ -139,7 +148,15 @@ def leer_texto(mensaje, max_len=20):
 
 
 def leer_entero(mensaje, minimo=None, maximo=None):
-    """Pide un entero y repite hasta que sea válido y esté en el rango."""
+    """Pide un entero y repite hasta que sea válido y esté en el rango.
+
+    Parámetros:
+        mensaje (str): texto que se muestra al pedir el dato.
+        minimo (int | None): valor mínimo permitido (opcional).
+        maximo (int | None): valor máximo permitido (opcional).
+    Retorna:
+        int: el número ingresado.
+    """
     while True:
         try:
             valor = int(input(mensaje).strip())
@@ -152,9 +169,37 @@ def leer_entero(mensaje, minimo=None, maximo=None):
         return valor
 
 
+def leer_decimal(mensaje, minimo=None, maximo=None):
+    """Pide un número decimal (acepta coma o punto) y repite hasta que sea válido.
+
+    Parámetros:
+        mensaje (str): texto que se muestra al pedir el dato.
+        minimo (float | None): valor mínimo permitido (opcional).
+        maximo (float | None): valor máximo permitido (opcional).
+    Retorna:
+        float: el número ingresado.
+    """
+    while True:
+        try:
+            valor = float(input(mensaje).strip().replace(",", "."))
+        except ValueError:
+            print("  Debes ingresar un número (por ejemplo 2.5).")
+            continue
+        if (minimo is not None and valor < minimo) or (maximo is not None and valor > maximo):
+            print(f"  El valor debe estar entre {minimo} y {maximo}.")
+            continue
+        return valor
+
+
 # ------------------------------------------------------------------- estado
 def crear_estado(nombre):
-    """Estado inicial: el explorador entra con inventario vacío."""
+    """Crea el estado inicial: el explorador entra con el inventario vacío.
+
+    Parámetros:
+        nombre (str): nombre del jugador.
+    Retorna:
+        dict: estado con jugador, inventario, recolectados, sala_actual e intentos.
+    """
     return {
         "jugador": {
             "nombre": nombre,
@@ -163,27 +208,49 @@ def crear_estado(nombre):
             "nivel": 1,              # int
             "activo": True,          # bool
         },
-        "inventario": [],            # list de dict (fragmentos)
+        "inventario": [],            # list de dict: fragmentos únicos
+        "recolectados": [],          # list de dict: todo lo recogido (puede repetirse)
         "sala_actual": 1,
         "intentos": 0,               # preguntas falladas
     }
 
 
 def calcular_puntaje(inventario, intentos):
-    """Suma de valores de los fragmentos menos la penalización por intentos."""
+    """Calcula el puntaje: suma de valores menos la penalización por intentos.
+
+    Parámetros:
+        inventario (list): fragmentos válidos (sin repetidos).
+        intentos (int): preguntas falladas.
+    Retorna:
+        float: puntaje, nunca negativo.
+    """
     total = sum(fragmento["valor"] for fragmento in inventario)
     return float(max(0, total - PENALIZACION_INTENTO * intentos))
 
 
 def guardar_seguro(estado):
-    """Guarda la partida; si falla, avisa pero no interrumpe el juego."""
+    """Guarda la partida y el archivo de recolectados; si falla, avisa sin interrumpir.
+
+    Parámetros:
+        estado (dict): estado de la partida.
+    Retorna:
+        None.
+    """
     try:
         persistencia.guardar_partida(estado)
+        persistencia.guardar_recolectados(estado.get("recolectados", []))
     except persistencia.ErrorPersistencia as error:
         print(f"  [Aviso] No se pudo guardar la partida: {error}")
 
 
 def mostrar_estado(estado):
+    """Imprime el resumen del jugador (vida, nivel, puntaje, intentos, fragmentos).
+
+    Parámetros:
+        estado (dict): estado de la partida.
+    Retorna:
+        None.
+    """
     jugador = estado["jugador"]
     print(f"  Explorador: {jugador['nombre']}")
     print(f"  Vida: {jugador['vida']}   Nivel: {jugador['nivel']}   "
@@ -193,28 +260,76 @@ def mostrar_estado(estado):
 
 # -------------------------------------------------------------------- retos
 def reto_vestibulo(estado):
-    """Vestíbulo: variables int, float, str y bool."""
+    """Sala 1 (Vestíbulo): tipos int, float, str y bool con conversión validada.
+
+    Parámetros:
+        estado (dict): estado de la partida.
+    Retorna:
+        None.
+    """
     print("Tu linterna ilumina un panel con tu estado. Cada dato tiene su propio tipo:\n")
     for clave, valor in estado["jugador"].items():
         print(f"  {clave:<8} = {valor!r:<14} -> {type(valor).__name__}")
-    print("\nPara operar con la vida o el nivel hay que convertir la entrada con int()")
-    print("y validarla; por eso el juego usa try/except en cada lectura.")
-    input("\n(Enter para continuar)")
+    print("\nReto: calibra tu linterna. input() siempre devuelve str, así que hay que")
+    print("convertir con int() y float() y validar la entrada.")
+    pilas = leer_entero("  ¿Cuántas pilas tienes? (entero, 1-9): ", 1, 9)
+    intensidad = leer_decimal("  Intensidad de la linterna (decimal, 0.5-5): ", 0.5, 5)
+    horas = pilas * intensidad
+    print(f"\n  pilas={pilas!r} ({type(pilas).__name__}), "
+          f"intensidad={intensidad!r} ({type(intensidad).__name__})")
+    print(f"  pilas * intensidad = {horas:.2f} ({type(horas).__name__}): "
+          "int por float da float.")
 
 
 def reto_estanterias(estado):
-    """Estanterías: lista (orden, acceso por posición, sorted con key)."""
-    sueltos = [
+    """Sala 2 (Estanterías): lista con inserción, eliminación, búsqueda y orden.
+
+    Parámetros:
+        estado (dict): estado de la partida.
+    Retorna:
+        None.
+    """
+    estanteria = [
         {"codigo": 3400, "titulo": "Redes"},
+        {"codigo": 0, "titulo": "(ficha ilegible)"},
         {"codigo": 1250, "titulo": "Álgebra"},
         {"codigo": 2780, "titulo": "Bases de datos"},
-        {"codigo": 1999, "titulo": "Python"},
     ]
-    print("Cuatro fichas están tiradas en el suelo, en desorden (una lista):\n")
-    for i, ficha in enumerate(sueltos):
+    print("Las fichas están en desorden en una lista:\n")
+    for i, ficha in enumerate(estanteria):
         print(f"  [{i}] {ficha['codigo']}  {ficha['titulo']}")
-    ordenados = sorted(sueltos, key=lambda ficha: ficha["codigo"])
-    print("\nReto: al ordenarlas de menor a mayor por código, ¿qué código queda en la posición 0?")
+
+    # 1) ELIMINAR
+    print("\nPaso 1 · Eliminar. Hay una ficha ilegible: indica su posición.")
+    while True:
+        posicion = leer_entero(f"  Posición (0-{len(estanteria) - 1}): ", 0, len(estanteria) - 1)
+        if estanteria[posicion]["codigo"] == 0:
+            eliminada = estanteria.pop(posicion)
+            print(f"  lista.pop({posicion}) -> se eliminó {eliminada['titulo']}")
+            break
+        print("  Esa ficha sí se puede leer. Busca la que tiene código 0.")
+
+    # 2) INSERTAR
+    estanteria.append({"codigo": 1999, "titulo": "Python"})
+    estanteria.insert(1, {"codigo": 3100, "titulo": "Estadística"})
+    print("\nPaso 2 · Insertar. Encuentras dos fichas más: append(1999) e insert(1, 3100).")
+    print(f"  Ahora hay {len(estanteria)} fichas.")
+
+    # 3) BUSCAR (con comprensión de listas)
+    print("\nPaso 3 · Buscar. Elige un código de la estantería para localizarlo.")
+    print(f"  Códigos presentes: {[ficha['codigo'] for ficha in estanteria]}")
+    while True:
+        codigo = leer_entero("  Código a buscar: ")
+        coincidencias = [i for i, ficha in enumerate(estanteria) if ficha["codigo"] == codigo]
+        if coincidencias:
+            print(f"  Comprensión [i for i, f in enumerate(lista) if f['codigo'] == {codigo}]"
+                  f" -> {coincidencias}")
+            break
+        print("  Ese código no está en la estantería.")
+
+    # 4) ORDENAR
+    ordenados = sorted(estanteria, key=lambda ficha: ficha["codigo"])
+    print("\nPaso 4 · Ordenar. Al ordenar de menor a mayor por código, ¿qué código queda en la posición 0?")
     while True:
         respuesta = leer_entero("  Código: ")
         if respuesta == ordenados[0]["codigo"]:
@@ -223,10 +338,21 @@ def reto_estanterias(estado):
     print("\nEstantería ordenada con sorted(lista, key=...):")
     for i, ficha in enumerate(ordenados):
         print(f"  [{i}] {ficha['codigo']}  {ficha['titulo']}")
-    print(f"  lista[0] = {ordenados[0]['codigo']}   lista[-1] = {ordenados[-1]['codigo']}")
+    titulos = [ficha["titulo"] for ficha in ordenados]
+    print(f"  Títulos (comprensión de listas): {titulos}")
 
 
 def dibujar_mapa(posicion, objetivo, filas, columnas):
+    """Dibuja la cuadrícula: E = explorador, X = salida, . = vacío.
+
+    Parámetros:
+        posicion (tuple): (fila, columna) del explorador.
+        objetivo (tuple): (fila, columna) de la salida.
+        filas (int): número de filas.
+        columnas (int): número de columnas.
+    Retorna:
+        None.
+    """
     for fila in range(filas):
         celdas = []
         for columna in range(columnas):
@@ -241,7 +367,13 @@ def dibujar_mapa(posicion, objetivo, filas, columnas):
 
 
 def reto_mapas(estado):
-    """Mapas: tuplas (fila, columna) inmutables."""
+    """Sala 3 (Mapas): posiciones como tuplas inmutables con desempaquetado.
+
+    Parámetros:
+        estado (dict): estado de la partida.
+    Retorna:
+        None.
+    """
     filas, columnas = 4, 4
     objetivo = (3, 3)
     posicion = (0, 0)
@@ -266,7 +398,13 @@ def reto_mapas(estado):
 
 
 def reto_fichas(estado):
-    """Fichas: diccionario consultado por clave con get()."""
+    """Sala 4 (Fichas): diccionario consultado por clave, con claves inexistentes.
+
+    Parámetros:
+        estado (dict): estado de la partida.
+    Retorna:
+        None.
+    """
     fichero = {
         7001: {"codigo": 7001, "titulo": "Catálogo de autores", "sala": "Estanterías", "valor": 10},
         7002: {"codigo": 7002, "titulo": "Registro de préstamos", "sala": "Sellos", "valor": 20},
@@ -290,7 +428,13 @@ def reto_fichas(estado):
 
 
 def reto_sellos(estado):
-    """Sellos: conjunto para quitar duplicados y validar pistas."""
+    """Sala 5 (Sellos): conjunto para quitar repetidos y validar pistas.
+
+    Parámetros:
+        estado (dict): estado de la partida.
+    Retorna:
+        None.
+    """
     pistas = [101, 205, 101, 307, 205, 412, 307, 101]
     validos = {101, 307, 500}
     print(f"Pistas selladas (con repetidas): {pistas}")
@@ -302,6 +446,7 @@ def reto_sellos(estado):
             break
         print("  No coincide. Pista: los repetidos cuentan una sola vez.")
     print(f"\n  set(pistas)         = {sorted(unicos)}")
+    print(f"  unicos | validos    = {sorted(unicos | validos)}   (unión)")
     print(f"  unicos & validos    = {sorted(unicos & validos)}   (pistas auténticas)")
     print(f"  unicos - validos    = {sorted(unicos - validos)}   (pistas falsas)")
     print(f"  validos - unicos    = {sorted(validos - unicos)}   (códigos que aún faltan)")
@@ -318,9 +463,16 @@ SALAS = {
 
 # --------------------------------------------------------------- preguntas
 def preguntar(estado, sala_id):
-    """Hace preguntas hasta acertar o quedarse sin vida.
+    """Hace preguntas conceptuales hasta acertar o quedarse sin vida.
 
-    Devuelve True si acertó, False si la vida llegó a 0.
+    Cada fallo resta 1 de vida y suma 1 intento; tras un fallo se plantea otra
+    pregunta distinta cuando el banco lo permite.
+
+    Parámetros:
+        estado (dict): estado de la partida (se modifica vida e intentos).
+        sala_id (int): número de sala (1 a 5).
+    Retorna:
+        bool: True si acertó; False si la vida llegó a 0.
     """
     jugador = estado["jugador"]
     ultima = None
@@ -348,35 +500,202 @@ def preguntar(estado, sala_id):
 
 
 def recibir_fragmento(estado, sala_id):
-    """Agrega el fragmento de la sala al inventario (sin duplicar) y actualiza el estado."""
+    """Entrega el fragmento de la sala y actualiza inventario, puntaje y nivel.
+
+    El fragmento va al inventario (sin duplicar) y al registro de recolectados.
+    En la sala 5 el explorador además halla una copia mojada de un fragmento
+    ya recogido, para que la depuración de la Sala Central tenga trabajo.
+
+    Parámetros:
+        estado (dict): estado de la partida (se modifica).
+        sala_id (int): sala superada (1 a 5).
+    Retorna:
+        None.
+    """
     fragmento = dict(FRAGMENTOS[sala_id])
+    recolectados = estado.setdefault("recolectados", [])
     codigos = {f["codigo"] for f in estado["inventario"]}
     if fragmento["codigo"] not in codigos:
         estado["inventario"].append(fragmento)
+        recolectados.append(dict(fragmento))
         print(f"Recibes el fragmento {fragmento['codigo']}: «{fragmento['titulo']}» "
               f"(+{fragmento['valor']} pts).")
+    if sala_id == TOTAL_SALAS and len(estado["inventario"]) > 1:
+        copia = dict(random.choice(estado["inventario"][:-1]))
+        recolectados.append(copia)
+        print(f"Entre los sellos hallas también una copia mojada del fragmento {copia['codigo']}.")
     estado["jugador"]["puntaje"] = calcular_puntaje(estado["inventario"], estado["intentos"])
     estado["sala_actual"] = sala_id + 1
     estado["jugador"]["nivel"] = estado["sala_actual"]
 
 
-# -------------------------------------------------------------- sala central
-def sala_central(estado):
-    """Vista preliminar: inserta el inventario en el BST y muestra el inorden.
+# -------------------------------------------------- La Reconstrucción del Catálogo
+def paso_carga(estado):
+    """Paso 1 (Carga): lee desde archivo los fragmentos recolectados.
 
-    La reconstrucción completa (6 pasos, consultas con conteo de comparaciones)
-    se implementa en la siguiente entrega.
+    Si el archivo no existe o está dañado, avisa y usa la copia del estado.
+
+    Parámetros:
+        estado (dict): estado de la partida.
+    Retorna:
+        list: fragmentos (diccionarios) leídos, posiblemente con repetidos.
     """
-    print("\n=== SALA CENTRAL (versión preliminar) ===")
+    print("\n--- Paso 1 · Carga: leer los fragmentos desde el archivo ---")
+    try:
+        fragmentos = persistencia.cargar_recolectados()
+        print(f"  Se leyeron {len(fragmentos)} fragmentos de {persistencia.RUTA_RECOLECTADOS}.")
+    except persistencia.ErrorPersistencia as error:
+        print(f"  [Aviso] {error}")
+        print("  Se usará la copia de los fragmentos guardada en la partida.")
+        fragmentos = [dict(f) for f in (estado.get("recolectados") or estado["inventario"])]
+    for fragmento in fragmentos:
+        print(f"    {fragmento['codigo']}  {fragmento['titulo']}")
+    return fragmentos
+
+
+def paso_depuracion(fragmentos):
+    """Paso 2 (Depuración): elimina repetidos con un conjunto de códigos.
+
+    Parámetros:
+        fragmentos (list): fragmentos leídos, posiblemente con repetidos.
+    Retorna:
+        tuple: (lista de fragmentos únicos en orden de aparición,
+                cantidad de fragmentos descartados).
+    """
+    print("\n--- Paso 2 · Depuración: eliminar duplicados con un conjunto ---")
+    vistos = set()
+    unicos = []
+    descartados = []
+    for fragmento in fragmentos:
+        if fragmento["codigo"] in vistos:
+            descartados.append(fragmento["codigo"])
+        else:
+            vistos.add(fragmento["codigo"])
+            unicos.append(fragmento)
+    print(f"  Códigos distintos: {sorted(vistos)}")
+    print(f"  Se descartaron {len(descartados)} fragmentos duplicados"
+          + (f" (códigos {descartados})." if descartados else "."))
+    return unicos, len(descartados)
+
+
+def paso_ubicacion(unicos):
+    """Paso 3 (Ubicación): asigna a cada fragmento una tupla (estante, nivel).
+
+    Los fragmentos se ordenan por código y se reparten FRAGMENTOS_POR_ESTANTE
+    por estante. La posición se guarda aparte, sin mezclarla con el fragmento.
+
+    Parámetros:
+        unicos (list): fragmentos sin repetidos.
+    Retorna:
+        dict: {codigo: (estante, nivel)}.
+    """
+    print("\n--- Paso 3 · Ubicación: posición (estante, nivel) como tupla ---")
+    posiciones = {}
+    for indice, fragmento in enumerate(sorted(unicos, key=lambda f: f["codigo"])):
+        estante = indice // FRAGMENTOS_POR_ESTANTE + 1
+        nivel = indice % FRAGMENTOS_POR_ESTANTE + 1
+        posiciones[fragmento["codigo"]] = (estante, nivel)
+    for codigo, posicion in posiciones.items():
+        estante, nivel = posicion  # desempaquetado
+        print(f"  {codigo} -> estante {estante}, nivel {nivel}   {posicion}")
+    return posiciones
+
+
+def paso_construccion(unicos):
+    """Paso 4 (Construcción): inserta los fragmentos en un BST por código.
+
+    Parámetros:
+        unicos (list): fragmentos sin repetidos, en el orden de inserción.
+    Retorna:
+        ArbolBST: el árbol construido.
+    """
+    print("\n--- Paso 4 · Construcción: árbol binario de búsqueda ---")
     arbol = ArbolBST()
-    for fragmento in estado["inventario"]:
-        arbol.insertar(fragmento["codigo"], fragmento)
-    print(f"Catálogo reconstruido con {len(arbol)} fragmentos.")
-    print(f"Recorrido inorden (códigos ordenados): {arbol.inorden()}")
+    for fragmento in unicos:
+        insertado = arbol.insertar(fragmento["codigo"], fragmento)
+        print(f"  insertar({fragmento['codigo']}) -> {'ok' if insertado else 'repetido'}")
+    print(f"  Árbol con {len(arbol)} nodos y altura {arbol.altura()}.")
+    return arbol
+
+
+def paso_verificacion(arbol, unicos):
+    """Paso 5 (Verificación): comprueba que el recorrido inorden esté ordenado.
+
+    Parámetros:
+        arbol (ArbolBST): árbol construido.
+        unicos (list): fragmentos que debían quedar en el árbol.
+    Retorna:
+        bool: True si el inorden está ordenado y contiene todos los códigos.
+    """
+    print("\n--- Paso 5 · Verificación: recorrido inorden ---")
+    recorrido = arbol.inorden()
+    print(f"  Inorden: {recorrido}")
+    ordenado = all(recorrido[i] < recorrido[i + 1] for i in range(len(recorrido) - 1))
+    completo = sorted(recorrido) == sorted(f["codigo"] for f in unicos)
+    if ordenado and completo:
+        print("  Verificación correcta: la lista está ordenada y no falta ningún fragmento.")
+        return True
+    print("  ERROR: el recorrido inorden no está ordenado o faltan fragmentos.")
+    return False
+
+
+def paso_consulta(arbol, unicos, posiciones):
+    """Paso 6 (Consulta): busca por código y compara árbol contra búsqueda secuencial.
+
+    Parámetros:
+        arbol (ArbolBST): árbol construido.
+        unicos (list): fragmentos en orden de aparición (lista para la búsqueda secuencial).
+        posiciones (dict): {codigo: (estante, nivel)}.
+    Retorna:
+        int: número de consultas realizadas.
+    """
+    print("\n--- Paso 6 · Consulta: árbol vs. búsqueda secuencial ---")
+    print(f"  Códigos del catálogo: {sorted(posiciones)}")
+    consultas = 0
+    while True:
+        codigo = leer_entero("  Código a buscar (0 para terminar): ")
+        if codigo == 0:
+            return consultas
+        consultas += 1
+        fragmento, comp_arbol = arbol.buscar(codigo)
+        _, comp_lista = busqueda_secuencial(unicos, codigo)
+        if fragmento is None:
+            print(f"  El código {codigo} no está en el catálogo.")
+        else:
+            print(f"  Encontrado: «{fragmento['titulo']}» ({fragmento['sala']}), "
+                  f"posición {posiciones[codigo]}")
+        print(f"  Comparaciones -> árbol: {comp_arbol} | búsqueda secuencial: {comp_lista}")
+
+
+def sala_central(estado):
+    """Sala Central: ejecuta «La Reconstrucción del Catálogo» (6 pasos visibles).
+
+    Parámetros:
+        estado (dict): estado de la partida.
+    Retorna:
+        bool: True si la verificación del árbol fue correcta.
+    """
+    print("\n=== SALA CENTRAL: LA RECONSTRUCCIÓN DEL CATÁLOGO ===")
+    fragmentos = paso_carga(estado)
+    unicos, descartados = paso_depuracion(fragmentos)
+    estado["inventario"] = [dict(f) for f in unicos]  # solo cuentan los fragmentos válidos
+    posiciones = paso_ubicacion(unicos)
+    arbol = paso_construccion(unicos)
+    correcto = paso_verificacion(arbol, unicos)
+    paso_consulta(arbol, unicos, posiciones)
+    return correcto
 
 
 # ------------------------------------------------------------------- partida
 def terminar_partida(estado, victoria):
+    """Cierra la partida: calcula el puntaje, lo registra y borra los temporales.
+
+    Parámetros:
+        estado (dict): estado de la partida.
+        victoria (bool): True si se reconstruyó el catálogo.
+    Retorna:
+        None.
+    """
     jugador = estado["jugador"]
     jugador["puntaje"] = calcular_puntaje(estado["inventario"], estado["intentos"])
     print("\n" + "=" * 50)
@@ -391,13 +710,22 @@ def terminar_partida(estado, victoria):
             jugador["nombre"], jugador["puntaje"], len(estado["inventario"]), estado["intentos"]
         )
         persistencia.eliminar_partida()
+        persistencia.eliminar_recolectados()
     except persistencia.ErrorPersistencia as error:
         print(f"  [Aviso] No se pudo actualizar el almacenamiento: {error}")
 
 
 def jugar(estado):
-    """Ciclo principal de la partida. Guarda al avanzar y ante una interrupción."""
+    """Ciclo principal de una partida; guarda al avanzar y ante una interrupción.
+
+    Parámetros:
+        estado (dict): estado inicial o cargado de la partida.
+    Retorna:
+        None.
+    """
     try:
+        estado.setdefault("recolectados", [dict(f) for f in estado["inventario"]])
+        guardar_seguro(estado)
         while estado["sala_actual"] <= TOTAL_SALAS:
             sala_id = estado["sala_actual"]
             print(f"\n=== SALA {sala_id}/{TOTAL_SALAS}: {NOMBRES_SALAS[sala_id].upper()} ===")
@@ -421,6 +749,13 @@ def jugar(estado):
 
 
 def nueva_partida():
+    """Inicia una partida nueva (pide confirmación si ya hay una guardada).
+
+    Parámetros:
+        ninguno.
+    Retorna:
+        None.
+    """
     if persistencia.existe_partida():
         resp = input("Ya hay una partida guardada; empezar una nueva la borrará. ¿Continuar? (s/n): ")
         if resp.strip().lower() != "s":
@@ -432,6 +767,13 @@ def nueva_partida():
 
 
 def continuar_partida():
+    """Carga la partida guardada y la reanuda; avisa si no existe o está dañada.
+
+    Parámetros:
+        ninguno.
+    Retorna:
+        None.
+    """
     try:
         estado = persistencia.cargar_partida()
     except persistencia.ErrorPersistencia as error:
@@ -445,6 +787,13 @@ def continuar_partida():
 
 
 def mostrar_puntajes():
+    """Muestra la tabla de puntajes (los 10 mejores).
+
+    Parámetros:
+        ninguno.
+    Retorna:
+        None.
+    """
     try:
         tabla = persistencia.cargar_puntajes()
     except persistencia.ErrorPersistencia as error:
@@ -461,6 +810,13 @@ def mostrar_puntajes():
 
 
 def main():
+    """Muestra el menú principal y dirige las opciones del jugador.
+
+    Parámetros:
+        ninguno.
+    Retorna:
+        None.
+    """
     print("=" * 50)
     print("  EL ARCHIVO PERDIDO")
     print("  Juego serio de estructuras de datos en Python")
