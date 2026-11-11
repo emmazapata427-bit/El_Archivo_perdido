@@ -3,6 +3,7 @@
 - Partida: un único JSON (``datos/partida.json``) con jugador, inventario,
   sala actual e intentos.
 - Tabla de puntajes: JSON (``datos/puntajes.json``) con una lista de registros.
+- Fragmentos recolectados: JSON (``datos/recolectados.json``), que lee la Sala Central.
 
 Las escrituras son atómicas (archivo temporal + ``os.replace``) para que un
 corte a mitad de guardado no deje el archivo corrupto. Todos los errores de
@@ -18,6 +19,7 @@ from datetime import datetime
 DIR_DATOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "datos")
 RUTA_PARTIDA = os.path.join(DIR_DATOS, "partida.json")
 RUTA_PUNTAJES = os.path.join(DIR_DATOS, "puntajes.json")
+RUTA_RECOLECTADOS = os.path.join(DIR_DATOS, "recolectados.json")
 
 MAX_PUNTAJES = 10
 CLAVES_FRAGMENTO = {"codigo": int, "titulo": str, "sala": str, "valor": int}
@@ -29,15 +31,36 @@ class ErrorPersistencia(Exception):
 
 # ----------------------------------------------------------------- utilidades
 def _es_entero(valor):
-    # bool es subclase de int; se excluye explícitamente.
+    """Indica si un valor es int (excluyendo bool, que es subclase de int).
+
+    Parámetros:
+        valor: cualquier objeto.
+    Retorna:
+        bool: True si es un entero «real».
+    """
     return isinstance(valor, int) and not isinstance(valor, bool)
 
 
 def _es_numero(valor):
+    """Indica si un valor es int o float (sin contar bool).
+
+    Parámetros:
+        valor: cualquier objeto.
+    Retorna:
+        bool: True si es numérico.
+    """
     return (_es_entero(valor)) or isinstance(valor, float)
 
 
 def _escribir_json(ruta, datos):
+    """Escribe datos en JSON de forma atómica (archivo temporal + os.replace).
+
+    Parámetros:
+        ruta (str): archivo de destino.
+        datos: objeto serializable a JSON.
+    Retorna:
+        None. Lanza ErrorPersistencia si la escritura falla.
+    """
     carpeta = os.path.dirname(ruta) or "."
     tmp = None
     try:
@@ -56,7 +79,14 @@ def _escribir_json(ruta, datos):
 
 
 def _leer_json(ruta):
-    """Devuelve el contenido, o None si el archivo no existe."""
+    """Lee un archivo JSON.
+
+    Parámetros:
+        ruta (str): archivo a leer.
+    Retorna:
+        El contenido decodificado, o None si el archivo no existe.
+        Lanza ErrorPersistencia si el JSON es inválido o hay error de lectura.
+    """
     try:
         with open(ruta, "r", encoding="utf-8") as archivo:
             return json.load(archivo)
@@ -70,6 +100,14 @@ def _leer_json(ruta):
 
 # ------------------------------------------------------------------ validación
 def validar_fragmento(fragmento):
+    """Comprueba que un fragmento tenga las claves y tipos del modelo de datos.
+
+    Parámetros:
+        fragmento (dict): debe tener codigo (int), titulo (str), sala (str)
+            y valor (int).
+    Retorna:
+        None. Lanza ErrorPersistencia si algo no coincide.
+    """
     if not isinstance(fragmento, dict):
         raise ErrorPersistencia("Un fragmento del inventario no es un diccionario.")
     for clave, tipo in CLAVES_FRAGMENTO.items():
@@ -83,7 +121,14 @@ def validar_fragmento(fragmento):
 
 
 def validar_estado(estado):
-    """Comprueba que el estado cargado tenga la forma esperada."""
+    """Comprueba que el estado de la partida tenga la forma y los tipos esperados.
+
+    Parámetros:
+        estado (dict): jugador, inventario, sala_actual, intentos y,
+            opcionalmente, recolectados.
+    Retorna:
+        None. Lanza ErrorPersistencia si algo no es válido.
+    """
     if not isinstance(estado, dict):
         raise ErrorPersistencia("El estado de la partida no es un objeto JSON.")
     for clave in ("jugador", "inventario", "sala_actual", "intentos"):
@@ -108,6 +153,11 @@ def validar_estado(estado):
     for fragmento in estado["inventario"]:
         validar_fragmento(fragmento)
 
+    if not isinstance(estado.get("recolectados", []), list):
+        raise ErrorPersistencia("'recolectados' debe ser una lista.")
+    for fragmento in estado.get("recolectados", []):
+        validar_fragmento(fragmento)
+
     if not _es_entero(estado["sala_actual"]) or not 1 <= estado["sala_actual"] <= 6:
         raise ErrorPersistencia("'sala_actual' debe estar entre 1 y 6.")
     if not _es_entero(estado["intentos"]) or estado["intentos"] < 0:
@@ -116,13 +166,27 @@ def validar_estado(estado):
 
 # --------------------------------------------------------------------- partida
 def guardar_partida(estado, ruta=RUTA_PARTIDA):
-    """Guarda el estado completo de la partida en JSON."""
+    """Valida y guarda el estado completo de la partida en JSON.
+
+    Parámetros:
+        estado (dict): estado de la partida.
+        ruta (str): archivo de destino.
+    Retorna:
+        None. Lanza ErrorPersistencia si el estado es inválido o falla la E/S.
+    """
     validar_estado(estado)
     _escribir_json(ruta, estado)
 
 
 def cargar_partida(ruta=RUTA_PARTIDA):
-    """Carga y valida la partida. Devuelve None si no hay partida guardada."""
+    """Carga y valida la partida guardada.
+
+    Parámetros:
+        ruta (str): archivo de origen.
+    Retorna:
+        dict con el estado, o None si no hay partida guardada.
+        Lanza ErrorPersistencia si el archivo está dañado o es inválido.
+    """
     estado = _leer_json(ruta)
     if estado is None:
         return None
@@ -131,11 +195,25 @@ def cargar_partida(ruta=RUTA_PARTIDA):
 
 
 def existe_partida(ruta=RUTA_PARTIDA):
+    """Indica si hay una partida guardada.
+
+    Parámetros:
+        ruta (str): archivo de la partida.
+    Retorna:
+        bool: True si el archivo existe.
+    """
     return os.path.isfile(ruta)
 
 
 def eliminar_partida(ruta=RUTA_PARTIDA):
-    """Borra la partida guardada (al terminar el juego). No falla si no existe."""
+    """Borra la partida guardada (al terminar el juego).
+
+    Parámetros:
+        ruta (str): archivo de la partida.
+    Retorna:
+        None. No falla si el archivo no existe; lanza ErrorPersistencia si
+        no se puede borrar.
+    """
     try:
         os.remove(ruta)
     except FileNotFoundError:
@@ -146,7 +224,14 @@ def eliminar_partida(ruta=RUTA_PARTIDA):
 
 # -------------------------------------------------------------------- puntajes
 def cargar_puntajes(ruta=RUTA_PUNTAJES):
-    """Devuelve la tabla de puntajes ordenada de mayor a menor ([] si no hay)."""
+    """Carga la tabla de puntajes.
+
+    Parámetros:
+        ruta (str): archivo de puntajes.
+    Retorna:
+        list: registros ordenados de mayor a menor puntaje ([] si no hay).
+        Lanza ErrorPersistencia si el archivo está dañado.
+    """
     datos = _leer_json(ruta)
     if datos is None:
         return []
@@ -164,7 +249,17 @@ def cargar_puntajes(ruta=RUTA_PUNTAJES):
 
 
 def registrar_puntaje(nombre, puntaje, fragmentos, intentos, ruta=RUTA_PUNTAJES):
-    """Agrega un registro y conserva solo los MAX_PUNTAJES mejores."""
+    """Agrega un registro a la tabla y conserva solo los MAX_PUNTAJES mejores.
+
+    Parámetros:
+        nombre (str): nombre del jugador.
+        puntaje (float): puntaje final.
+        fragmentos (int): fragmentos válidos recuperados.
+        intentos (int): preguntas falladas.
+        ruta (str): archivo de puntajes.
+    Retorna:
+        list: la tabla actualizada.
+    """
     tabla = cargar_puntajes(ruta)
     tabla.append(
         {
@@ -179,3 +274,53 @@ def registrar_puntaje(nombre, puntaje, fragmentos, intentos, ruta=RUTA_PUNTAJES)
     tabla = tabla[:MAX_PUNTAJES]
     _escribir_json(ruta, tabla)
     return tabla
+
+
+# ---------------------------------------------------------------- recolectados
+def guardar_recolectados(fragmentos, ruta=RUTA_RECOLECTADOS):
+    """Guarda en un archivo los fragmentos recolectados durante la partida.
+
+    Parámetros:
+        fragmentos (list): lista de diccionarios (puede incluir repetidos).
+        ruta (str): archivo de destino.
+    Retorna:
+        None. Lanza ErrorPersistencia si algún fragmento es inválido o falla la E/S.
+    """
+    for fragmento in fragmentos:
+        validar_fragmento(fragmento)
+    _escribir_json(ruta, fragmentos)
+
+
+def cargar_recolectados(ruta=RUTA_RECOLECTADOS):
+    """Lee desde archivo los fragmentos recolectados (Paso 1 de la Sala Central).
+
+    Parámetros:
+        ruta (str): archivo de origen.
+    Retorna:
+        list: fragmentos (diccionarios). Lanza ErrorPersistencia si el archivo
+        no existe, está dañado o contiene fragmentos inválidos.
+    """
+    datos = _leer_json(ruta)
+    if datos is None:
+        raise ErrorPersistencia(f"No existe el archivo de fragmentos '{ruta}'.")
+    if not isinstance(datos, list):
+        raise ErrorPersistencia("El archivo de fragmentos debe contener una lista.")
+    for fragmento in datos:
+        validar_fragmento(fragmento)
+    return datos
+
+
+def eliminar_recolectados(ruta=RUTA_RECOLECTADOS):
+    """Borra el archivo de fragmentos recolectados al terminar la partida.
+
+    Parámetros:
+        ruta (str): archivo de fragmentos.
+    Retorna:
+        None. No falla si no existe.
+    """
+    try:
+        os.remove(ruta)
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise ErrorPersistencia(f"No se pudo borrar '{ruta}': {error}") from error
